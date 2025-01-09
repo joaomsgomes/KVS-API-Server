@@ -5,3 +5,4 @@ src/server/ems
 *.o
 *.out
 .vscode
+*:Zone.Identifier

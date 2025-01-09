@@ -13,6 +13,7 @@
 #include "operations.h"
 #include "io.h"
 #include "pthread.h"
+#include "src/common/protocol.h"
 
 struct SharedData {
   DIR* dir;
@@ -20,13 +21,38 @@ struct SharedData {
   pthread_mutex_t directory_mutex;
 };
 
+pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER; 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t n_current_backups_lock = PTHREAD_MUTEX_INITIALIZER;
 
+size_t active_sessions = 0;
 size_t active_backups = 0;     // Number of active backups
 size_t max_backups;            // Maximum allowed simultaneous backups
 size_t max_threads;            // Maximum allowed simultaneous threads
 char* jobs_directory = NULL;
+
+int req_pipes[S];
+int res_pipes[S];
+int notif_pipes[S];
+
+
+int start_session() {
+
+    pthread_mutex_lock(&sessions_lock);
+
+    if (active_sessions >= S) {  
+        pthread_mutex_unlock(&sessions_lock);  
+        return -1;  
+    }
+
+    active_sessions++;  
+
+    pthread_mutex_unlock(&sessions_lock);  
+    
+    return 0;
+    
+  }
+
 
 int filter_job_files(const struct dirent* entry) {
     const char* dot = strrchr(entry->d_name, '.');
@@ -270,14 +296,87 @@ static void dispatch_threads(DIR* dir) {
   free(threads);
 }
 
+int get_client_slot() {
+  for (int i = 0; i < S ; i++) {
+    if (req_pipes[i] == '\0') {
+      return i;
+    }
+  }
+}
+
+int handle_client_regist(char* buffer, ssize_t reg_bytes_read) {
+
+    if (reg_bytes_read < 0) {
+        fprintf(stderr, "Invalid message size.\n");
+        return -1;
+    }
+
+    // 1|pipe_pedido|pipe_resposta|pipe_notif
+
+    buffer[reg_bytes_read] = '\0'; // Garantir terminação nula
+
+    // Separar os campos do buffer
+    char* token = strtok(buffer, "|");
+    if (token == NULL) {
+        fprintf(stderr, "Invalid message format (no OP_CODE).\n");
+        return -1;
+    }
+
+    char op_code = token[0];
+    printf("OP_CODE: %c\n", op_code);
+
+    // Extrair nomes dos FIFOs
+    char* fifo_requests = strtok(NULL, "|");
+    char* fifo_responses = strtok(NULL, "|");
+    char* fifo_notifications = strtok(NULL, "|");
+
+    if (fifo_requests == NULL || fifo_responses == NULL || fifo_notifications == NULL) {
+        fprintf(stderr, "Invalid message format (missing FIFO names).\n");
+        return -1;
+    }
+
+    // Abrir FIFOs do cliente
+    int requests_fd = open(fifo_requests, O_RDONLY);
+    if (requests_fd == -1) {
+        perror("Failed to open requests FIFO");
+        return -1;
+    }
+
+    int responses_fd = open(fifo_responses, O_WRONLY);
+    
+    if (responses_fd == -1) {
+        perror("Failed to open responses FIFO");
+        close(requests_fd);
+        return -1;
+    }
+
+    int notifications_fd = open(fifo_notifications, O_WRONLY);
+    if (notifications_fd == -1) {
+        perror("Failed to open notifications FIFO");
+        close(requests_fd);
+        return -1;
+    }
+
+    int position = get_client_slot();
+    
+    // Adds pipes to server
+    req_pipes[position] = requests_fd; 
+    res_pipes[position] = responses_fd;
+    notif_pipes[position] = notifications_fd;
+    
+    // FIFOs opened successfully
+    return responses_fd;
+}
+
 
 int main(int argc, char** argv) {
-  if (argc < 4) {
+  if (argc < 5) {
     write_str(STDERR_FILENO, "Usage: ");
     write_str(STDERR_FILENO, argv[0]);
     write_str(STDERR_FILENO, " <jobs_dir>");
 		write_str(STDERR_FILENO, " <max_threads>");
 		write_str(STDERR_FILENO, " <max_backups> \n");
+    write_str(STDERR_FILENO, " <register_pipe_path> \n");
     return 1;
   }
 
@@ -308,6 +407,13 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
+  const char* register_pipe = argv[4];
+
+  if (mkfifo(register_pipe) <= 0) {
+    write_str(STDERR_FILENO, "Failed to create FIFO\n");
+    return 1;
+  }
+
   if (kvs_init()) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
     return 1;
@@ -318,6 +424,73 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Failed to open directory: %s\n", argv[1]);
     return 0;
   }
+
+  // Abrir FIFO para leitura
+  int reg_pipe_fd = open(register_pipe, O_RDONLY);
+  if (reg_pipe_fd == -1) {
+      perror("Failed to open FIFO for reading");
+      closedir(dir);
+      return 1;
+  }
+
+  // Monitorar mensagens no FIFO
+  char buffer[MAX_WRITE_SIZE*3 + 1];
+  while (1) {
+
+      ssize_t reg_bytes_read = read(reg_pipe_fd, buffer, sizeof(buffer) - 1);
+
+      if (reg_bytes_read > 0) {
+        
+          buffer[reg_bytes_read] = '\0';
+          
+          int responses_fd = handle_client_regist(buffer, reg_bytes_read);
+
+          write_str(responses_fd, "1|0\n");
+          close(responses_fd);
+          
+      } else if (reg_bytes_read == 0) {
+          usleep(100000);
+          printf("No clients connected. Waiting...\n");
+      } else {
+          perror("Error reading from FIFO");
+          break;
+      }
+
+      if (active_sessions > 0) {
+        for (size_t r = 0; r < S; r++) {
+          ssize_t req_bytes_read = read(req_pipes[r], buffer, sizeof(buffer) - 1);
+
+          if (req_bytes_read > 0) {
+            int op_code = buffer[0];
+            
+            switch (op_code) {
+              
+              case OP_CODE_DISCONNECT:
+                break;
+
+              case OP_CODE_SUBSCRIBE:
+              
+                break;
+
+              case OP_CODE_UNSUBSCRIBE:
+                break;
+
+              default:
+                break;
+            }
+          }
+          
+        }
+      }
+        
+
+
+        printf("Started a new session. Active sessions: %zu\n", active_sessions);
+
+  }
+
+  close(reg_pipe_fd);
+  unlink(register_pipe); // Remover o FIFO
 
   dispatch_threads(dir);
 

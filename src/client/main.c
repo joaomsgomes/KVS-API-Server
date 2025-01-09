@@ -25,11 +25,18 @@ int main(int argc, char* argv[]) {
   unsigned int delay_ms;
   size_t num;
 
-  strncat(req_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
+  strncat(req_pipe_path, argv[1], strlen(argv[1]) * sizeof(char)); // Adding Client's ID to each Pipe
   strncat(resp_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
   strncat(notif_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
 
-  // TODO open pipes
+  const char* server_pipe_path = argv[2];
+                
+  if (kvs_connect(req_pipe_path, resp_pipe_path, notif_pipe_path, server_pipe_path) != 0) {
+    
+    write_str(STDERR_FILENO, "Failed to connect to the server\n");
+    write_str(stdout, "Server returned 0 for operation: connect\n");
+    return 1;
+  }
 
   while (1) {
     switch (get_next(STDIN_FILENO)) {

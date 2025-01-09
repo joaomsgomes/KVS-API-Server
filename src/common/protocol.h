@@ -6,6 +6,9 @@
 // usam estes opcodes tambem nos clientes quando enviam mensagens para o server
 enum {
   OP_CODE_CONNECT = 1,
+  OP_CODE_DISCONNECT = 2,
+  OP_CODE_SUBSCRIBE = 3,
+  OP_CODE_UNSUBSCRIBE = 4,
   // TODO mais opcodes para cada operacao
 };
 
