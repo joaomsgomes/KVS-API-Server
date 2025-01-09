@@ -1,1 +1,1 @@
-# proj_23-24# ProjetoSO-2
+# ProjetoSO-2
