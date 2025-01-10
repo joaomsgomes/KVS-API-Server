@@ -7,13 +7,15 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <signal.h>
 
 #include "constants.h"
 #include "parser.h"
 #include "operations.h"
 #include "io.h"
 #include "pthread.h"
-#include "src/common/protocol.h"
+#include "../common/protocol.h"
 
 struct SharedData {
   DIR* dir;
@@ -35,6 +37,9 @@ int req_pipes[S];
 int res_pipes[S];
 int notif_pipes[S];
 
+char res_output[MAX_JOB_FILE_NAME_SIZE];
+
+char output[MAX_STRING_SIZE];
 
 int start_session() {
 
@@ -52,6 +57,18 @@ int start_session() {
     return 0;
     
   }
+
+void close_cleanPipes(int position) {
+
+  close(notif_pipes[position]);
+  close(res_pipes[position]);
+  close(req_pipes[position]);
+
+  notif_pipes[position] = '\0';
+  res_pipes[position] = '\0';
+  req_pipes[position] = '\0';
+
+}
 
 
 int filter_job_files(const struct dirent* entry) {
@@ -102,6 +119,7 @@ static int run_job(int in_fd, int out_fd, char* filename) {
         if (kvs_write(num_pairs, keys, values)) {
           write_str(STDERR_FILENO, "Failed to write pair\n");
         }
+
         break;
 
       case CMD_READ:
@@ -302,9 +320,97 @@ int get_client_slot() {
       return i;
     }
   }
+  return -1;
 }
 
-int handle_client_regist(char* buffer, ssize_t reg_bytes_read) {
+void sigusr1_handler() {
+    // Bloquear o acesso a active_sessions enquanto modifica
+    pthread_mutex_lock(&sessions_lock);
+    
+    if (active_sessions > 0) {
+        // Encontra uma sessão ativa para encerrar
+        for (int i = 0; i < S; i++) {
+            if (req_pipes[i] != '\0') { // Verifica se o pipe está ativo
+                fprintf(stderr, "Interrupting session for client at position %d\n", i);
+                close_cleanPipes(i); // Fecha e limpa os pipes
+                active_sessions--;
+                break; // Sai após encerrar uma sessão
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&sessions_lock);
+}
+
+
+int handle_client_subscription(char* buffer , ssize_t req_bytes_read, int position) {
+
+  if (req_bytes_read < 0) {
+    fprintf(stderr, "Invalid message size.\n");
+    return -1;
+  }
+
+    buffer[req_bytes_read] = '\0'; // Garantir terminação nula
+
+    // Separar os campos do buffer
+  char* token = strtok(buffer, "|");
+  
+  if (token == NULL) {
+    fprintf(stderr, "Invalid message format (no OP_CODE).\n");
+    return -1;
+  }
+
+  char* key = strtok(NULL, "|");
+
+  if (key == NULL) {
+        fprintf(stderr, "Invalid message format (missing KEY).\n");
+        return -1;
+  }
+
+  int notif_id = notif_pipes[position];
+  
+  return add_key_subscriber(key, notif_id);
+
+}
+
+int handle_client_unsubscription(char* buffer, ssize_t req_bytes_read, int position) {
+  
+  if (req_bytes_read < 0) {
+    fprintf(stderr, "Invalid message size.\n");
+    return -1;
+  }
+
+  buffer[req_bytes_read] = '\0'; // Garantir terminação nula
+
+    // Separar os campos do buffer
+  char* token = strtok(buffer, "|");
+  
+  if (token == NULL) {
+    fprintf(stderr, "Invalid message format (no OP_CODE).\n");
+    return -1;
+  }
+
+  char* key = strtok(NULL, "|");
+
+  if (key == NULL) {
+        fprintf(stderr, "Invalid message format (missing KEY).\n");
+        return -1;
+  }
+
+  int notif_id = notif_pipes[position];
+  
+  return remove_key_subscriber(key, notif_id);
+}
+
+int handle_client_unregister(int position) {
+
+ int notif_pipes_id  = notif_pipes[position];
+
+ return disconnect_client(notif_pipes_id);
+  
+}
+
+int handle_client_register(char* buffer, ssize_t reg_bytes_read) {
 
     if (reg_bytes_read < 0) {
         fprintf(stderr, "Invalid message size.\n");
@@ -368,8 +474,19 @@ int handle_client_regist(char* buffer, ssize_t reg_bytes_read) {
     return responses_fd;
 }
 
-
 int main(int argc, char** argv) {
+
+  struct sigaction sa;
+  sa.sa_handler = sigusr1_handler;
+  sa.sa_flags = 0;
+  sigemptyset(&sa.sa_mask);
+  
+
+  if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("Failed to set SIGUSR1 handler");
+        exit(1);
+  }
+
   if (argc < 5) {
     write_str(STDERR_FILENO, "Usage: ");
     write_str(STDERR_FILENO, argv[0]);
@@ -409,11 +526,13 @@ int main(int argc, char** argv) {
 
   const char* register_pipe = argv[4];
 
-  if (mkfifo(register_pipe) <= 0) {
+  if (mkfifo(register_pipe, 0666) == -1) {
     write_str(STDERR_FILENO, "Failed to create FIFO\n");
     return 1;
   }
 
+  write_str(STDOUT_FILENO, "criadoo");
+  
   if (kvs_init()) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
     return 1;
@@ -425,34 +544,44 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  write_str(STDOUT_FILENO, "Directory opened: \n");
+
   // Abrir FIFO para leitura
+  snprintf(output, MAX_WRITE_SIZE, "Register pipe path: %s\n", register_pipe);
+  write_str(STDOUT_FILENO, output);
   int reg_pipe_fd = open(register_pipe, O_RDONLY);
+  
   if (reg_pipe_fd == -1) {
       perror("Failed to open FIFO for reading");
       closedir(dir);
       return 1;
   }
-
+  write_str(STDOUT_FILENO, "Pipe opened: \n");
+  write_str(STDOUT_FILENO, "ola\n");
   // Monitorar mensagens no FIFO
   char buffer[MAX_WRITE_SIZE*3 + 1];
   while (1) {
-
+    write_str(STDOUT_FILENO, "reading pipe...not cooking\n");
       ssize_t reg_bytes_read = read(reg_pipe_fd, buffer, sizeof(buffer) - 1);
 
       if (reg_bytes_read > 0) {
         
           buffer[reg_bytes_read] = '\0';
-          
-          int responses_fd = handle_client_regist(buffer, reg_bytes_read);
 
-          write_str(responses_fd, "1|0\n");
-          close(responses_fd);
+          int res_pipe;
+          if ((res_pipe = handle_client_register(buffer, reg_bytes_read)) == -1) {
+            perror("Error handling client regist\n");
+            continue;
+          }
+          start_session(); //TEMPORARIO
+          write_str(res_pipe  , "1|0\n");
+          close(res_pipe);
           
       } else if (reg_bytes_read == 0) {
-          usleep(100000);
+          sleep(5);
           printf("No clients connected. Waiting...\n");
       } else {
-          perror("Error reading from FIFO");
+          perror("Error reading from FIFO\n");
           break;
       }
 
@@ -462,17 +591,39 @@ int main(int argc, char** argv) {
 
           if (req_bytes_read > 0) {
             int op_code = buffer[0];
+            int result;
             
             switch (op_code) {
               
               case OP_CODE_DISCONNECT:
+                
+                result = handle_client_unregister((int)r);
+                
+                if (result != -1) {
+                  snprintf(res_output, sizeof(res_output), "2|%d", result);
+                  write_str(res_pipes[r], res_output);
+                }
+                close_cleanPipes((int) r);
+
                 break;
 
               case OP_CODE_SUBSCRIBE:
-              
+                
+                result = handle_client_subscription(buffer, req_bytes_read, (int) r);
+                if (result != -1) {
+                  snprintf(res_output, sizeof(res_output), "3|%d", result);
+                  write_str(res_pipes[r], res_output);
+                }
                 break;
 
               case OP_CODE_UNSUBSCRIBE:
+                
+                result = handle_client_unsubscription(buffer, req_bytes_read, (int) r);
+                if (result != -1) {
+                  snprintf(res_output, sizeof(res_output), "4|%d", result);
+                  write_str(res_pipes[r], res_output);
+                }
+                
                 break;
 
               default:
@@ -482,10 +633,8 @@ int main(int argc, char** argv) {
           
         }
       }
+
         
-
-
-        printf("Started a new session. Active sessions: %zu\n", active_sessions);
 
   }
 

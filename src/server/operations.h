@@ -4,6 +4,18 @@
 #include <stddef.h>
 #include "constants.h"
 
+
+typedef struct ClientNode {
+    int notif_fd; 
+    struct ClientNode* next; 
+} ClientNode;
+
+typedef struct SubscriptionEntry {
+    char key[MAX_STRING_SIZE]; 
+    ClientNode* head_client; 
+    struct SubscriptionEntry* next; 
+} SubscriptionEntry;
+
 /// Initializes the KVS state.
 /// @return 0 if the KVS state was initialized successfully, 1 otherwise.
 int kvs_init();
@@ -59,5 +71,17 @@ void set_n_current_backups(int _n_current_backups);
 // Getter for n_current_backups
 // @return n_current_backups
 int get_n_current_backups();
+
+int add_key_subscriber(const char* key, int notif_id);
+
+int remove_key_subscriber(const char* key, int notif_id);
+
+int disconnect_client(int notif_id);
+
+SubscriptionEntry* add_entry(const char* key);
+
+SubscriptionEntry* remove_entry(const char* key);
+
+SubscriptionEntry* find_entry(const char* key);
 
 #endif  // KVS_OPERATIONS_H
