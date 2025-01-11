@@ -25,7 +25,7 @@ src/client/client: src/common/protocol.h src/common/constants.h src/client/main.
 	$(CC) $(CFLAGS) -c ${@:.o=.c} -o $@
 
 clean:
-	rm -f src/common/*.o src/client/*.o src/server/*.o src/server/core/*.o src/server/kvs src/client/client src/client/client_write
+	rm -f src/common/*.o src/client/*.o src/server/*.o src/server/core/*.o src/server/kvs src/client/client src/client/client_write /tmp/reg* /tmp/req* /tmp/notif* /tmp/resp*
 
 format:
 	@which clang-format >/dev/null 2>&1 || echo "Please install clang-format to run this command"

@@ -10,42 +10,81 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-char* req_pipe;
-char* res_pipe;
-char* notif_pipe;
+int req_pipe_fd;
+int resp_pipe_fd;
+int notif_pipe_fd;
 
-char request[MAX_STRING_SIZE];
+pthread_t notif_tid;
+
+char request[MAX_STRING_SIZE*3+5];
+
+void* notification_thread(void* arg) {
+    const char* notif_pipe_path = (const char*)arg;
+
+    printf("Notification path (client notif thread): %s\n", notif_pipe_path);
+
+    notif_pipe_fd = open(notif_pipe_path, O_RDONLY);
+    if (notif_pipe_fd == -1) {
+      perror("thread_notif: Erro ao abrir FIFO de notificações");
+      free(arg);
+      return NULL;
+    }
+
+    printf("Notif pipe opened\n");
+
+    char buffer[256];
+
+    while (1) {
+        ssize_t bytes_read = read(notif_pipe_fd, buffer, sizeof(buffer) - 1);
+        if (bytes_read > 0) {
+            buffer[bytes_read] = '\0'; // Garantir que é uma string válida
+            printf("Notification: %s\n", buffer);
+        } else if (bytes_read == 0) {
+            // Fim do FIFO
+            break;
+        } else {
+            perror("Erro ao ler do FIFO de notificações");
+            break;
+        }
+    }
+
+    free(arg);
+    return NULL;
+}
 
 int print_output(const char* operation) {
 
-  char response[MAX_STRING_SIZE];
+  char response[MAX_WRITE_SIZE];
   char output[MAX_WRITE_SIZE];
 
-  int response_fd = open(res_pipe, O_RDONLY);
-  if (response_fd < 0) {
-    perror("Failed to open response pipe");
-    return 1;
-  }
+  ssize_t bytes_read = read(resp_pipe_fd, response, MAX_WRITE_SIZE);
 
-  ssize_t bytes_read = read(response_fd, response, strlen(response) - 1);
+  snprintf(output, MAX_WRITE_SIZE, "Bytes Read: %ld\n", bytes_read);
+  write(STDOUT_FILENO, output, MAX_WRITE_SIZE);
 
-  if (bytes_read == 0) {
+  if (bytes_read < 0) {
     perror("Failed to read response pipe\n");
-    close(response_fd);
     return 1;
   }
-
   response[bytes_read] = '\0';
-  snprintf(output, sizeof(output), "Server returned %d for operation: %s\n", response[bytes_read - 1], operation);
 
-  if (write(STDOUT_FILENO, output, strlen(output)) < 0) {
-    perror("Failed to write to stdout");
-    close(response_fd);
+  snprintf(output, MAX_WRITE_SIZE*4, "Response to client: %s\n", response);
+  write(STDOUT_FILENO, output, MAX_WRITE_SIZE);
+
+
+  if (response[0] != '1') {
+    perror("Wrong Response OPCODE");
     return 1;
   }
+  snprintf(output, sizeof(output),
+  "Server returned %c for operation: %s\n", response[bytes_read - 1], operation);
+    
 
-  close(response_fd);
-  return 0;
+  if (write(STDOUT_FILENO, output, sizeof(output)-1) < 0) {
+    perror("Failed to write to stdout");
+    
+    return 1;
+  }
 
   return 0;
 }
@@ -68,9 +107,8 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
     return -1;
   }
 
-  strcpy(req_pipe, req_pipe_path);
-  strcpy(res_pipe, resp_pipe_path);
-  strcpy(notif_pipe, notif_pipe_path);
+  char* notif_pipe_path_copy = strdup(notif_pipe_path);
+  pthread_create(&notif_tid, NULL, notification_thread, notif_pipe_path_copy);
 
   int server_fd = open(server_pipe_path, O_WRONLY);
 
@@ -79,32 +117,56 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
     exit(EXIT_FAILURE);
   }
 
-  snprintf(request, sizeof(request), "%s|%s|%s\n", req_pipe_path, resp_pipe_path, notif_pipe_path);
-
-
+  snprintf(request, sizeof(request), "1|%s|%s|%s", req_pipe_path, resp_pipe_path, notif_pipe_path);
+  
   if (write_all(server_fd, request, strlen(request)) == -1) {
-    perror("Error Registing in Server\n");
+    perror("Error Registering in Server\n");
     return -1;
   }
 
+  req_pipe_fd = open(req_pipe_path, O_WRONLY);
+    if (req_pipe_fd < 0) {
+        perror("Pedidos: Erro ao abrir FIFO de pedidos");
+        close(notif_pipe_fd);
+        return 1;
+    }
+
+  write_all(STDOUT_FILENO, "Request pipe opened\n", MAX_STRING_SIZE);
+
+  resp_pipe_fd = open(resp_pipe_path, O_RDONLY);
+  if (resp_pipe_fd == -1) {
+      perror("Respostas: Erro ao abrir FIFO de respostas");
+      close(req_pipe_fd);
+      close(notif_pipe_fd);
+      return 1;
+  }
+
+  write_all(STDOUT_FILENO, "Response pipe opened\n", MAX_STRING_SIZE);
+
+  
   if (print_output("connect")) {
+    close(resp_pipe_fd);
     return -1;
   }
+  
 
   return 0;
 }
  
 int kvs_disconnect(void) {
   // close pipes and unlink pipe files
-
-  int req_fd = open(req_pipe, O_WRONLY);
-
-  if (write_all(req_fd, "2", 1) == -1) {
-    perror("Error Registering in Server\n");
-    close(req_fd);
+  printf("OLA SEMEDO\n");
+  if (write_all(req_pipe_fd, "2", 1) == -1) {
+    perror("WTF: Error Unregistering from Server\n");
+    close(req_pipe_fd);
     return -1;
   }
-  close(req_fd);
+  pthread_cancel(notif_tid);
+  pthread_join(notif_tid, NULL);
+
+  close(req_pipe_fd);
+  close(resp_pipe_fd);
+  close(notif_pipe_fd);
 
   if (print_output("disconnect")) {
     return -1;
@@ -114,19 +176,18 @@ int kvs_disconnect(void) {
 
 }
 
+
+
 int kvs_subscribe(const char* key) {
   // send subscribe message to request pipe and wait for response in response pipe
-
-  int req_fd = open(req_pipe, O_WRONLY);
   
   snprintf(request, sizeof(request) + 2, "3|%s", key);
 
-  if (write_all(req_fd, request, strlen(request)) == -1) {
-    perror("Error Registering in Server\n");
-    close(req_fd);
+  if (write_all(req_pipe_fd, request, strlen(request)) == -1) {
+    perror("Error Subscribing Key in Server\n");
+
     return 1;
   }
-  close(req_fd);
 
   if (print_output("subscribe")) {
     return 1;
@@ -138,21 +199,18 @@ int kvs_subscribe(const char* key) {
 int kvs_unsubscribe(const char* key) {
   // send unsubscribe message to request pipe and wait for response in response pipe
 
-  int req_fd = open(req_pipe, O_WRONLY);
 
   snprintf(request, sizeof(request) + 2, "4|%s", key);
 
-  if (write_all(req_fd, request, strlen(request)) == -1) {
-    perror("Error Registering in Server\n");
-    close(req_fd);
-    return 1;
-  }
-  close(req_fd);
-
-  if (print_output("unsubscribe")) {
+  if (write_all(req_pipe_fd, request, strlen(request)) == -1) {
+    perror("Error Unsubscribing Key in Server\n");
     return 1;
   }
 
+  /*if (print_output("unsubscribe")) {
+    return 1;
+  }
+  */
 
   return 0;
 }
