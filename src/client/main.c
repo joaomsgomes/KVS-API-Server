@@ -38,15 +38,15 @@ int main(int argc, char* argv[]) {
 
   while (1) {
     
-    write_all(STDOUT_FILENO, "SWITCH\n", 8);
+    //write_all(STDOUT_FILENO, "SWITCH\n", 8);
     switch (get_next(STDIN_FILENO)) {
       
       case CMD_DISCONNECT:
-        //if (kvs_disconnect() != 0) {
-        //  fprintf(stderr, "Failed to disconnect to the server\n");
-        //  return 1;
-        //
-        //}
+        if (kvs_disconnect() != 0) {
+          fprintf(stderr, "Failed to disconnect to the server\n");
+          return 1;
+        
+        }
         
         // TODO: end notifications thread 
         // UPDATE: THREAD IS ENDED IN API
@@ -54,6 +54,7 @@ int main(int argc, char* argv[]) {
         return 0;
 
       case CMD_SUBSCRIBE:
+        printf("Entrou no Subscribe\n");
         num = parse_list(STDIN_FILENO, keys, 1, MAX_STRING_SIZE);
         if (num == 0) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
@@ -101,11 +102,11 @@ int main(int argc, char* argv[]) {
 
       case EOC:
         // input should end in a disconnect, or it will loop here forever
-        /*if (kvs_disconnect() != 0) {
+        if (kvs_disconnect() != 0) {
           fprintf(stderr, "Failed to disconnect to the server\n");
           return 1;
         }
-        */
+        
         printf("Disconnected from server\n");
         return 0;
     }

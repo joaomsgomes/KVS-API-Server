@@ -32,6 +32,7 @@ typedef struct ThreadArgs {
 } ThreadArgs;
 
 pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 sem_t sessions_sem;
 
 pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER; 
@@ -363,11 +364,12 @@ void sigusr1_handler() {
 int handle_client_subscription(char* buffer, int position) {
 
     // Separar os campos do buffer
-  write_str(STDOUT_FILENO, buffer);
+  
+  printf("%s\n", buffer);
   
   char* token = strtok(buffer, "|");
   
-  write_str(STDOUT_FILENO, token);
+  //write_str(STDOUT_FILENO, token);
 
   if (token == NULL) {
     fprintf(stderr, "Invalid message format (no OP_CODE).\n");
@@ -375,7 +377,8 @@ int handle_client_subscription(char* buffer, int position) {
   }
 
   char* key = strtok(NULL, "|"); 
-
+  //write_str(STDOUT_FILENO, key);
+  
   if (key == NULL) {
         fprintf(stderr, "Invalid message format (missing KEY).\n");
         return -1;
@@ -505,8 +508,8 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
       if (registration) {       
         registration = 0;
       } else {
-        printf("I Might be blocked!\n");
         bytes_read = read(req_pipes[thread_id], buffer, sizeof(buffer) - 1);
+        printf("Bytes_read: %ld e %s\n",bytes_read, buffer);
       }
 
       if (bytes_read - 1 < 0) {
@@ -552,7 +555,7 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
           result = handle_client_subscription(buffer, (int) thread_id);
           if (result != -1) {
             snprintf(res_output, sizeof(res_output), "3|%d", result);
-            write_str(res_pipes[thread_id], res_output);
+            write(res_pipes[thread_id], res_output, 4);
           }
           break;
 
@@ -561,7 +564,7 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
           result = handle_client_unsubscription(buffer, (int) thread_id);
           if (result != -1) {
             snprintf(res_output, sizeof(res_output), "4|%d", result);
-            write_str(res_pipes[thread_id], res_output);
+            write(res_pipes[thread_id], res_output, 4);
           }
           
           break;

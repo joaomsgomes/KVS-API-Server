@@ -18,10 +18,19 @@ pthread_t notif_tid;
 
 char request[MAX_STRING_SIZE*3+5];
 
+pthread_mutex_t print_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
+void thread_safe_print(const char* message) {
+    pthread_mutex_lock(&print_mutex);
+    printf("%s\n", message);
+    pthread_mutex_unlock(&print_mutex);
+}
+
 void* notification_thread(void* arg) {
     const char* notif_pipe_path = (const char*)arg;
 
-    printf("Notification path (client notif thread): %s\n", notif_pipe_path);
+    //printf("Notification path (client notif thread): %s\n", notif_pipe_path);
 
     notif_pipe_fd = open(notif_pipe_path, O_RDONLY);
     if (notif_pipe_fd == -1) {
@@ -30,7 +39,7 @@ void* notification_thread(void* arg) {
       return NULL;
     }
 
-    printf("Notif pipe opened\n");
+    //thread_safe_print("Notif pipe opened\n");
 
     char buffer[256];
 
@@ -57,10 +66,10 @@ int print_output(const char* operation) {
   char response[MAX_WRITE_SIZE];
   char output[MAX_WRITE_SIZE];
 
+
   ssize_t bytes_read = read(resp_pipe_fd, response, MAX_WRITE_SIZE);
 
   snprintf(output, MAX_WRITE_SIZE, "Bytes Read: %ld\n", bytes_read);
-  write(STDOUT_FILENO, output, MAX_WRITE_SIZE);
 
   if (bytes_read < 0) {
     perror("Failed to read response pipe\n");
@@ -69,22 +78,13 @@ int print_output(const char* operation) {
   response[bytes_read] = '\0';
 
   snprintf(output, MAX_WRITE_SIZE*4, "Response to client: %s\n", response);
-  write(STDOUT_FILENO, output, MAX_WRITE_SIZE);
-
-
-  if (response[0] != '1') {
-    perror("Wrong Response OPCODE");
-    return 1;
-  }
-  snprintf(output, sizeof(output),
-  "Server returned %c for operation: %s\n", response[bytes_read - 1], operation);
-    
-
-  if (write(STDOUT_FILENO, output, sizeof(output)-1) < 0) {
-    perror("Failed to write to stdout");
-    
-    return 1;
-  }
+  
+  //printf("Print Output Subscribe\n");
+  printf("Bytes_Read: %ld\n", bytes_read);
+  printf("%s\n", response);
+  
+  snprintf(output, sizeof(output), "Server returned %c for operation: %s\n", response[bytes_read - 2], operation);
+  thread_safe_print(output);
 
   return 0;
 }
@@ -131,19 +131,16 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
         return 1;
     }
 
-  write_all(STDOUT_FILENO, "Request pipe opened\n", MAX_STRING_SIZE);
-
+  
   resp_pipe_fd = open(resp_pipe_path, O_RDONLY);
+
   if (resp_pipe_fd == -1) {
       perror("Respostas: Erro ao abrir FIFO de respostas");
       close(req_pipe_fd);
       close(notif_pipe_fd);
       return 1;
   }
-
-  write_all(STDOUT_FILENO, "Response pipe opened\n", MAX_STRING_SIZE);
-
-  
+    
   if (print_output("connect")) {
     close(resp_pipe_fd);
     return -1;
@@ -155,9 +152,9 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
  
 int kvs_disconnect(void) {
   // close pipes and unlink pipe files
-  printf("OLA SEMEDO\n");
+  
   if (write_all(req_pipe_fd, "2", 1) == -1) {
-    perror("WTF: Error Unregistering from Server\n");
+    perror("Error Unregistering from Server\n");
     close(req_pipe_fd);
     return -1;
   }
@@ -183,7 +180,7 @@ int kvs_subscribe(const char* key) {
   
   snprintf(request, sizeof(request) + 2, "3|%s", key);
 
-  if (write_all(req_pipe_fd, request, strlen(request)) == -1) {
+  if (write_all(req_pipe_fd, request, 5) == -1) {
     perror("Error Subscribing Key in Server\n");
 
     return 1;
@@ -202,7 +199,7 @@ int kvs_unsubscribe(const char* key) {
 
   snprintf(request, sizeof(request) + 2, "4|%s", key);
 
-  if (write_all(req_pipe_fd, request, strlen(request)) == -1) {
+  if (write_all(req_pipe_fd, request, 5) == -1) {
     perror("Error Unsubscribing Key in Server\n");
     return 1;
   }
