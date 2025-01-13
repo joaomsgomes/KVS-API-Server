@@ -84,8 +84,6 @@ void remove_entry(const char* key);
 
 SubscriptionEntry* find_entry(const char* key);
 
-void print_subscriptions();
-
 void remove_all_subscriptions();
 
 #endif  // KVS_OPERATIONS_H

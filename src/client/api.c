@@ -28,7 +28,7 @@ void thread_safe_print(const char* message) {
 }
 
 void end_client() {
-  printf("ENDING CLIENT\n");
+
   pthread_mutex_destroy(&print_mutex);
   pthread_cancel(notif_tid);
   pthread_join(notif_tid, NULL);
@@ -39,8 +39,6 @@ void end_client() {
 
 void* notification_thread(void* arg) {
     const char* notif_pipe_path = (const char*)arg;
-
-    //printf("Notification path (client notif thread): %s\n", notif_pipe_path);
 
     notif_pipe_fd = open(notif_pipe_path, O_RDONLY);
     if (notif_pipe_fd == -1) {
@@ -55,45 +53,42 @@ void* notification_thread(void* arg) {
     while (1) {
         ssize_t bytes_read = read(notif_pipe_fd, buffer, sizeof(buffer) - 1);
         if (bytes_read > 0) {
-          buffer[bytes_read] = '\0'; // Garantir que o buffer seja uma string válida
+          buffer[bytes_read] = '\0';
 
           if (strcmp("SIGUSR1", buffer) == 0) {
             printf("SIGUS RECEIVED -> aborting client\n");
             break;
           }
           
-          // Percorrer o buffer para adicionar espaçamento entre os pares
-          char spaced_buffer[2 * sizeof(buffer)]; // Buffer maior para incluir novas linhas
-          size_t j = 0; // Índice para o spaced_buffer
+          //Adding space between possible pairs present in the buffer
+          char spaced_buffer[2 * sizeof(buffer)];
+          size_t j = 0; 
 
           for (size_t i = 0; i < (size_t)bytes_read; i++) {
               spaced_buffer[j++] = buffer[i];
 
-              // Adicionar uma nova linha após cada ')'
+              
               if (buffer[i] == ')') {
                   spaced_buffer[j++] = '\n';
               }
           }
-
-          // Garantir que o spaced_buffer seja uma string válida
           spaced_buffer[j] = '\0';
-
-          // Escrever o buffer com espaçamento no STDOUT
           write_all(STDOUT_FILENO, spaced_buffer, j);
+
         } else if (bytes_read == 0) {
-            // Fim do FIFO
+            
             break;
         } else {
-            perror("Erro ao ler do FIFO de notificações");
+            perror("Error Reading Notification FIFO");
             end_client();
             break;
         }
     }
 
     free(arg);
-    //sleep(5)
+    
     exit(1);
-    //return NULL;
+    
 }
 
 int print_output(const char* operation) {
@@ -109,7 +104,6 @@ int print_output(const char* operation) {
   }
   response[bytes_read] = '\0';
 
-  
   snprintf(output, sizeof(output), "Server returned %c for operation: %s\n", response[bytes_read - 2], operation);
   thread_safe_print(output);
 
@@ -137,8 +131,6 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
   char* notif_pipe_path_copy = strdup(notif_pipe_path);
   pthread_create(&notif_tid, NULL, notification_thread, notif_pipe_path_copy);
 
-  printf("Preparing to open server pipe\n");
-
   int server_fd = open(server_pipe_path, O_WRONLY);
 
   if (server_fd == -1) {
@@ -146,18 +138,12 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
     exit(EXIT_FAILURE);
   }
 
-  printf("Successfulyy opened server pipe\n");
-
   snprintf(request, sizeof(request), "1|%s|%s|%s", req_pipe_path, resp_pipe_path, notif_pipe_path);
-  
-  printf("Requesting: %s\n", request);
 
   if (write_all(server_fd, request, strlen(request)) == -1) {
     perror("Error Registering in Server\n");
     return -1;
   }
-
-  printf("Request sent successfully\n");
 
   req_pipe_fd = open(req_pipe_path, O_WRONLY);
     if (req_pipe_fd < 0) {
@@ -166,7 +152,6 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
         return 1;
     }
 
-  
   resp_pipe_fd = open(resp_pipe_path, O_RDONLY);
   if (resp_pipe_fd == -1) {
       perror("Respostas: Error opening Responses' FIFO");
@@ -184,7 +169,6 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
 }
  
 int kvs_disconnect(void) {
-  // close pipes and unlink pipe files
   
   if (write_all(req_pipe_fd, "2", 2) == -1) {
     perror("Error Unregistering from Server\n");

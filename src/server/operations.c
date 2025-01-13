@@ -25,32 +25,6 @@ pthread_mutex_t remove_subs_lock = PTHREAD_MUTEX_INITIALIZER;
 
 SubscriptionEntry* head = NULL;
 
-void print_subscriptions() {
-    if (head == NULL) {
-        printf("No subscriptions available.\n");
-        return;
-    }
-
-    SubscriptionEntry* current_entry = head;
-    while (current_entry != NULL) {
-        printf("Key: %s\n", current_entry->key);
-        
-        ClientNode* current_client = current_entry->head_client;
-        if (current_client == NULL) {
-            printf("  No clients subscribed to this key.\n");
-        } else {
-            printf("  Clients:\n");
-            while (current_client != NULL) {
-                printf("    - Client notif_fd: %d\n", current_client->notif_fd);
-                current_client = current_client->next;
-            }
-        }
-
-        current_entry = current_entry->next;
-    }
-}
-
-
 SubscriptionEntry* find_entry(const char* key) {
   
   SubscriptionEntry* current = head;
@@ -62,14 +36,14 @@ SubscriptionEntry* find_entry(const char* key) {
   }
   return NULL;
 }
-
+//Add a node from SubscriptionEntry List
 void add_entry(const char* key) {
   
   SubscriptionEntry* new_entry = (SubscriptionEntry*)malloc(sizeof(SubscriptionEntry));
 
   if (!new_entry) {
     perror("Failed to allocate memory for SubscriptionEntry");
-    return; // Retorna a lista original
+    return;
   }
 
   if (find_entry(key) != NULL) {
@@ -77,15 +51,15 @@ void add_entry(const char* key) {
     return;
   }
 
-  // Inicializar os campos do nó
+  // Inicialize new node
   strncpy(new_entry->key, key, MAX_STRING_SIZE - 1);
-  new_entry->key[MAX_STRING_SIZE - 1] = '\0'; // Garantir terminação
+  new_entry->key[MAX_STRING_SIZE - 1] = '\0'; 
   new_entry->head_client = NULL;
-  new_entry->next = head; // Aponta para o antigo cabeçalho
+  new_entry->next = head;
 
-  head = new_entry; // Retorna o novo cabeçalho
+  head = new_entry;
 }
-
+//Remove a node from SusbcriptionEntry List
 void remove_entry(const char* key) {
 
   if (head == NULL) {
@@ -117,48 +91,42 @@ void remove_entry(const char* key) {
   free(curr);
 
 }
-
+//Add a specific subscription
 int add_key_subscriber(const char* key, int notif_id) {
 
-  printf("Subscribing %d\n", notif_id);
-
+  
   SubscriptionEntry* entry = find_entry(key);
 
   if (entry == NULL) {
-    printf("Entry not found\n");
-    
     return 1;
   }
 
-  // Verificar se o cliente já está subscrito
     ClientNode* current = entry->head_client;
     while (current != NULL) {
         if (current->notif_fd == notif_id) {
-            // Cliente já subscrito
             
-            return 0; // Nenhuma alteração necessária
+            
+            return 0; 
         }
         current = current->next;
     }
 
-  // Criar um novo cliente
+  
   ClientNode* new_client = (ClientNode*)malloc(sizeof(ClientNode));
   
   if (!new_client) {
       perror("Failed to allocate memory for ClientNode");
       
-      return -1; // Retorna erro se a alocação falhar
+      return -1; 
   }
 
-  new_client->notif_fd = notif_id; // Define o ID de notificação
-  new_client->next = entry->head_client; // Insere no início da lista de clientes
-  entry->head_client = new_client; // Atualiza o ponteiro para a lista de clientes
+  new_client->notif_fd = notif_id; 
+  new_client->next = entry->head_client; 
+  entry->head_client = new_client;
 
-  
-  
-  return 0; // Sucesso
+  return 0;
 }
-
+//Remove a specific subscription
 int remove_key_subscriber(const char* key, int notif_id) {
   
   if (head == NULL || key == NULL) {
@@ -195,7 +163,7 @@ int remove_key_subscriber(const char* key, int notif_id) {
   
   return 1;
 }
-
+//Function responsible for Disconnecting a Client
 int disconnect_client(int notif_id) {
 
   SubscriptionEntry* entry = head;
@@ -244,21 +212,21 @@ void notify_clients(SubscriptionEntry* entry, const char* new_value) {
   
     while (curr_client != NULL) {
 
-        // Enviar a mensagem de notificação
-        char notification[MAX_STRING_SIZE*2 + 4]; // Espaço suficiente para chave, valor e parênteses
+        
+        char notification[MAX_STRING_SIZE*2 + 4]; 
         snprintf(notification, sizeof(notification), "(%s,%s)", entry->key, new_value);
 
-        //pthread_mutex_lock(&notif);
+        
         ssize_t bytes_written = write(curr_client->notif_fd, notification, strlen(notification));
-        //pthread_mutex_unlock(&notif);
+        
 
         if (bytes_written < 0) {
-            perror("WTF: Failed to write to notification pipe\n");
+            perror("Failed to write to notification pipe\n");
         } else {
             printf("Notification sent to client pipe %d\n", curr_client->notif_fd);
         }
 
-        // Passar para o próximo cliente
+        
         curr_client = curr_client->next;
     }
 
@@ -269,8 +237,6 @@ void remove_all_subscriptions() {
     SubscriptionEntry* entry = head;
 
     while (entry != NULL) {
-      printf("LOOP INFINITO?\n");
-        // Limpar os clientes associados à chave
         ClientNode* client = entry->head_client;
         while (client != NULL) {
             ClientNode* next_client = client->next;
@@ -280,19 +246,9 @@ void remove_all_subscriptions() {
 
         entry->head_client = NULL;
 
-        // Limpar a entrada de assinatura
         SubscriptionEntry* next_entry = entry->next;
         entry = next_entry;
     }
-
-    printf("No more entries to remove subscriptions!\n");
-
-    //print_subscriptions();
-
-    //head = NULL; // Garantir que o ponteiro head esteja nulo após a limpeza
-
-    print_subscriptions();
-
 
 }
 
@@ -334,16 +290,12 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
     }
     SubscriptionEntry* entry = find_entry(keys[i]);
 
-    //printf("NEW WRITE ON KEY %s\n", keys[i]);
+    
 
     if (entry == NULL) {
       add_entry(keys[i]);
     } else {
-      //pthread_mutex_lock(&delete_subs_lock);
-      printf("Gonna notify clients\n");
       notify_clients(entry, values[i]);
-      write_str(STDOUT_FILENO, "Clients Notified!\n");
-      //pthread_mutex_unlock(&delete_subs_lock);
 
     }
   }
@@ -403,11 +355,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
       write_str(fd, str);
     } else {
       SubscriptionEntry* entry = find_entry(keys[i]);
-      //pthread_mutex_lock(&delete_subs_lock);
-      printf("Gonna notify clients\n");
       notify_clients(entry, "DELETED");
-      printf("Clients notified\n");
-      //pthread_mutex_unlock(&delete_subs_lock);
       remove_entry(keys[i]);
     }
     

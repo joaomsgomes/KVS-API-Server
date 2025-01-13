@@ -273,11 +273,10 @@ static void* get_file(void* arguments) {
   pthread_exit(NULL);
 }
 
-
+//Function Responsible for handling SIGUSR1
 void sigusr1_handler(int sig) {
   (void)sig;
 
-  printf("Signal handled\n");
   received_sigusr1 = 1;
   
 }
@@ -285,11 +284,9 @@ void sigusr1_handler(int sig) {
 
 int handle_client_subscription(char* buffer, int thread_id) {
 
-    // Separar os campos do buffer
-  
+
+  //Retrieving message from buffer into tokens  
   char* token = strtok(buffer, "|");
-  
-  //write_str(STDOUT_FILENO, token);
 
   if (token == NULL) {
     fprintf(stderr, "Invalid message format (no OP_CODE).\n");
@@ -297,7 +294,7 @@ int handle_client_subscription(char* buffer, int thread_id) {
   }
 
   char* key = strtok(NULL, "|"); 
-  //write_str(STDOUT_FILENO, key);
+  
   
   if (key == NULL) {
         fprintf(stderr, "Invalid message format (missing KEY).\n");
@@ -306,7 +303,7 @@ int handle_client_subscription(char* buffer, int thread_id) {
 
   int notif_id = notif_pipes[thread_id];
 
-  //printf("NOTIF ID SUBSCRIBING: %d thread id: %d\n", notif_id, thread_id);
+  
   
   return add_key_subscriber(key, notif_id);
 
@@ -314,7 +311,7 @@ int handle_client_subscription(char* buffer, int thread_id) {
 
 int handle_client_unsubscription(char* buffer, int thread_id) {
 
-    // Separar os campos do buffer
+    
   char* token = strtok(buffer, "|");
   
   if (token == NULL) {
@@ -344,7 +341,6 @@ int handle_client_unregister(int thread_id) {
 
 int handle_client_register(char* buffer, int thread_id) {
   
-    // Separar os campos do buffer
     char* token = strtok(buffer, "|");
     if (token == NULL) {
         fprintf(stderr, "Invalid message format (no OP_CODE).\n");
@@ -401,22 +397,20 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
   int result;
 
     while (server_on) {
-      
-      //printf("new iteration\n");
-      //printf("Requests pipe [%d]: %d\n", thread_id, req_pipes[thread_id]);
-      //printf("Responses pipe [%d]: %d\n", thread_id, res_pipes[thread_id]);
-      //printf("Notif pipe [%d]: %d\n", thread_id, notif_pipes[thread_id]);
+      //Conditional if for CONNECT Operation
       if (registration) {       
         registration = 0;
       } else {
-        //printf("Buffer_size = %ld\n", sizeof(buffer) - 1);
         bytes_read = read(req_pipes[thread_id], buffer, sizeof(buffer) - 1);
-        printf("req_pipes[%d]: %d\n", thread_id, req_pipes[thread_id]);
       }
 
-      if (bytes_read - 1 < 0) {
-        fprintf(stderr, "Invalid message sizeEEEE.\n");
+      if (bytes_read < 0) {
+        fprintf(stderr, "Invalid message size.\n");
         break;
+      }
+
+      if (bytes_read == 0) {
+        continue;
       }
   
       buffer[bytes_read - 1] = '\0';
@@ -425,10 +419,6 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
       switch (buffer[0]) {
 
         case OP_CODE_CONNECT:
-          //printf("CONNECT\n");
-          //snprintf(output, MAX_WRITE_SIZE, "Pipe path: %s\n", buffer);
-          //write_str(STDOUT_FILENO, output);
-
           if ((handle_client_register(buffer, thread_id)) == -1) {
             perror("Error handling client regist\n");
             write(res_pipes[thread_id] , "1|1", 4);
@@ -440,7 +430,7 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
           break;
         
         case OP_CODE_DISCONNECT:
-          //printf("DISCONNECT\n");
+          
           result = handle_client_unregister(thread_id);
           
           if (result == -1) {
@@ -449,11 +439,11 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
           }
           snprintf(output, sizeof(output), "2|%d", result);
           write(res_pipes[thread_id], output, 4);
-
-          break;
+          close_clean_pipes(thread_id);
+          return;
 
         case OP_CODE_SUBSCRIBE:
-          //printf("SUBSCRIBE\n");
+          
           result = handle_client_subscription(buffer, thread_id);
           if (result == -1) {
             perror("Error handling client subscription\n");
@@ -464,7 +454,6 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
           break;
 
         case OP_CODE_UNSUBSCRIBE:
-          //printf("UNSUBSCRIBE\n");
           result = handle_client_unsubscription(buffer, thread_id);
 
           if (result == -1) {
@@ -490,65 +479,48 @@ void* client_thread(void* arg) {
 
   while (1) {
 
-    
-      printf("Thread %d: Waiting on semaphore\n", thread_id);
+    if (server_on) {
+      
+      // Wait for permission to read sharable buffer
       sem_wait(&buffer_sem);
       active_sessions++;
-      printf("Thread %d: Got semaphore\n", thread_id);
-
+      
       pthread_mutex_lock(&buffer_mutex);
 
       char buffer[MAX_WRITE_SIZE];
       strncpy(buffer, buffer_server, sizeof(buffer) - 1);
-
-      printf("\nConnecting request: %s on thread ID: %d\n", buffer_server, thread_id);
 
       pthread_mutex_unlock(&buffer_mutex);
 
       client_session(thread_id, buffer, sizeof(buffer) - 1);
       active_sessions--;
 
-      printf("Session ended!\n");
-
       sem_post(&sessions_sem);
-
-      //printf("Client on thread %d Disconnected\n", thread_id);
-    
-
+    }
+      
   }
 
 }
 
 void reset_server() {
 
-  printf("escrever pipe notif\n");
+  server_on = 0;
   for (size_t i = 0; i <  MAX_SESSION_COUNT; i++) {
     if (notif_pipes[i] > 0) {
       write(notif_pipes[i], "SIGUSR1", 8);
     } // Notify client of a SIGUSR1 SIGNAL
     
   }
-
-  print_subscriptions();
-  printf("DETETOU ERRO SIGUSR1\n");
-      // Limpar tudooooo
   received_sigusr1 = 0;
-  server_on = 0;
 
   while (1) {
     if (active_sessions == 0) {
-      printf("Sessões Terminadas!\n");
       remove_all_subscriptions();
-      printf("Removeu Subscricoes\n");
       break;
     }
   }
 
   server_on = 1;
-
-  sleep(5);
-
-  //print_subscriptions();
 
 }
 
@@ -558,8 +530,6 @@ void clients_receiver(int reg_pipe_fd) {
 
   while (1) {
 
-    printf("Awaiting clients...\n");
-    // print_subscriptions();
     if (received_sigusr1) {
       reset_server();
     }
@@ -568,20 +538,19 @@ void clients_receiver(int reg_pipe_fd) {
 
     ssize_t reg_bytes_read = read(reg_pipe_fd, local_buffer, sizeof(local_buffer) - 1);
     
-    printf("Request read: %s, Bytes_read: %ld\n", local_buffer, reg_bytes_read);
 
     if (reg_bytes_read > 1) {
-      //write_str(STDOUT_FILENO, "A client wants to start a session\n");
-      printf("Wating for sessions semaphore\n");
+      
+      // Wait for available session
       sem_wait(&sessions_sem);
-      printf("GOT ONE\n");
 
       local_buffer[reg_bytes_read] = '\0';
 
+      // Write in sharable buffer
       pthread_mutex_lock(&buffer_mutex);
-
       strcpy(buffer_server, local_buffer);
 
+      // Now the thread client can read the buffer
       sem_post(&buffer_sem);
       pthread_mutex_unlock(&buffer_mutex); 
 
@@ -635,7 +604,7 @@ static void dispatch_threads(DIR* dir, const char* register_pipe) {
     pthread_create(&client_threads[i], NULL, client_thread, thread_id);
   }
 
-  printf("Ja podes mandar o sinal!\n");
+  
 
   pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 
