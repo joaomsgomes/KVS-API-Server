@@ -59,8 +59,7 @@ void* notification_thread(void* arg) {
 
           if (strcmp("SIGUSR1", buffer) == 0) {
             printf("SIGUS RECEIVED -> aborting client\n");
-            //end_client();
-            exit(1);
+            break;
           }
           
           // Percorrer o buffer para adicionar espaçamento entre os pares
@@ -92,8 +91,9 @@ void* notification_thread(void* arg) {
     }
 
     free(arg);
-    end_client();
-    return NULL;
+    //sleep(5)
+    exit(1);
+    //return NULL;
 }
 
 int print_output(const char* operation) {
@@ -137,6 +137,8 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
   char* notif_pipe_path_copy = strdup(notif_pipe_path);
   pthread_create(&notif_tid, NULL, notification_thread, notif_pipe_path_copy);
 
+  printf("Preparing to open server pipe\n");
+
   int server_fd = open(server_pipe_path, O_WRONLY);
 
   if (server_fd == -1) {
@@ -144,12 +146,18 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
     exit(EXIT_FAILURE);
   }
 
+  printf("Successfulyy opened server pipe\n");
+
   snprintf(request, sizeof(request), "1|%s|%s|%s", req_pipe_path, resp_pipe_path, notif_pipe_path);
   
+  printf("Requesting: %s\n", request);
+
   if (write_all(server_fd, request, strlen(request)) == -1) {
     perror("Error Registering in Server\n");
     return -1;
   }
+
+  printf("Request sent successfully\n");
 
   req_pipe_fd = open(req_pipe_path, O_WRONLY);
     if (req_pipe_fd < 0) {

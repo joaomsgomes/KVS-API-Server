@@ -411,12 +411,12 @@ void client_session(int thread_id, char* buffer, ssize_t bytes_read) {
       } else {
         //printf("Buffer_size = %ld\n", sizeof(buffer) - 1);
         bytes_read = read(req_pipes[thread_id], buffer, sizeof(buffer) - 1);
-        //printf("Bytes_read: %ld e %s\n",bytes_read, buffer);
+        printf("req_pipes[%d]: %d\n", thread_id, req_pipes[thread_id]);
       }
 
       if (bytes_read - 1 < 0) {
-        fprintf(stderr, "Invalid message size.\n");
-        return;
+        fprintf(stderr, "Invalid message sizeEEEE.\n");
+        break;
       }
   
       buffer[bytes_read - 1] = '\0';
@@ -491,22 +491,24 @@ void* client_thread(void* arg) {
   while (1) {
 
     
-      //printf("Thread %d: Waiting on semaphore\n", thread_id);
+      printf("Thread %d: Waiting on semaphore\n", thread_id);
       sem_wait(&buffer_sem);
       active_sessions++;
-      //printf("Thread %d: Got semaphore\n", thread_id);
+      printf("Thread %d: Got semaphore\n", thread_id);
 
       pthread_mutex_lock(&buffer_mutex);
 
       char buffer[MAX_WRITE_SIZE];
       strncpy(buffer, buffer_server, sizeof(buffer) - 1);
 
-      //printf("\nRequest: %s on thread ID: %d\n", buffer_server, thread_id);
+      printf("\nConnecting request: %s on thread ID: %d\n", buffer_server, thread_id);
 
       pthread_mutex_unlock(&buffer_mutex);
 
       client_session(thread_id, buffer, sizeof(buffer) - 1);
       active_sessions--;
+
+      printf("Session ended!\n");
 
       sem_post(&sessions_sem);
 
@@ -542,9 +544,11 @@ void reset_server() {
     }
   }
 
-  sleep(20);
+  server_on = 1;
 
-  print_subscriptions();
+  sleep(5);
+
+  //print_subscriptions();
 
 }
 
@@ -553,6 +557,8 @@ void clients_receiver(int reg_pipe_fd) {
   server_on = 1;
 
   while (1) {
+
+    printf("Awaiting clients...\n");
     // print_subscriptions();
     if (received_sigusr1) {
       reset_server();
@@ -561,11 +567,14 @@ void clients_receiver(int reg_pipe_fd) {
     char local_buffer[MAX_PIPE_PATH_LENGTH*4];
 
     ssize_t reg_bytes_read = read(reg_pipe_fd, local_buffer, sizeof(local_buffer) - 1);
+    
+    printf("Request read: %s, Bytes_read: %ld\n", local_buffer, reg_bytes_read);
 
     if (reg_bytes_read > 1) {
       //write_str(STDOUT_FILENO, "A client wants to start a session\n");
-
+      printf("Wating for sessions semaphore\n");
       sem_wait(&sessions_sem);
+      printf("GOT ONE\n");
 
       local_buffer[reg_bytes_read] = '\0';
 
@@ -626,7 +635,7 @@ static void dispatch_threads(DIR* dir, const char* register_pipe) {
     pthread_create(&client_threads[i], NULL, client_thread, thread_id);
   }
 
-  printf("Já podes mandar o sinal!\n");
+  printf("Ja podes mandar o sinal!\n");
 
   pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 

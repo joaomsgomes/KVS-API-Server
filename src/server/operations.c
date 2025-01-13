@@ -21,7 +21,7 @@ static struct timespec delay_to_timespec(unsigned int delay_ms) {
   return (struct timespec){delay_ms / 1000, (delay_ms % 1000) * 1000000};
 }
 
-pthread_mutex_t delete_subs_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t remove_subs_lock = PTHREAD_MUTEX_INITIALIZER;
 
 SubscriptionEntry* head = NULL;
 
@@ -120,23 +120,41 @@ void remove_entry(const char* key) {
 
 int add_key_subscriber(const char* key, int notif_id) {
 
+  printf("Subscribing %d\n", notif_id);
+
   SubscriptionEntry* entry = find_entry(key);
 
   if (entry == NULL) {
-    //printf("Entry not found\n");
+    printf("Entry not found\n");
+    
     return 1;
   }
+
+  // Verificar se o cliente já está subscrito
+    ClientNode* current = entry->head_client;
+    while (current != NULL) {
+        if (current->notif_fd == notif_id) {
+            // Cliente já subscrito
+            
+            return 0; // Nenhuma alteração necessária
+        }
+        current = current->next;
+    }
+
   // Criar um novo cliente
   ClientNode* new_client = (ClientNode*)malloc(sizeof(ClientNode));
   
   if (!new_client) {
       perror("Failed to allocate memory for ClientNode");
+      
       return -1; // Retorna erro se a alocação falhar
   }
 
   new_client->notif_fd = notif_id; // Define o ID de notificação
   new_client->next = entry->head_client; // Insere no início da lista de clientes
   entry->head_client = new_client; // Atualiza o ponteiro para a lista de clientes
+
+  
   
   return 0; // Sucesso
 }
@@ -145,6 +163,7 @@ int remove_key_subscriber(const char* key, int notif_id) {
   
   if (head == NULL || key == NULL) {
     printf("Null head or null key\n");
+    
     return -1;
   }
 
@@ -173,8 +192,7 @@ int remove_key_subscriber(const char* key, int notif_id) {
       prev = current;
       current = current->next;
   }
-
-
+  
   return 1;
 }
 
@@ -248,11 +266,10 @@ void notify_clients(SubscriptionEntry* entry, const char* new_value) {
 
 void remove_all_subscriptions() {
 
-  //pthread_mutex_lock(&delete_subs_lock);
-
     SubscriptionEntry* entry = head;
 
     while (entry != NULL) {
+      printf("LOOP INFINITO?\n");
         // Limpar os clientes associados à chave
         ClientNode* client = entry->head_client;
         while (client != NULL) {
@@ -261,14 +278,20 @@ void remove_all_subscriptions() {
             client = next_client;
         }
 
+        entry->head_client = NULL;
+
         // Limpar a entrada de assinatura
         SubscriptionEntry* next_entry = entry->next;
         entry = next_entry;
     }
 
-    head = NULL; // Garantir que o ponteiro head esteja nulo após a limpeza
+    printf("No more entries to remove subscriptions!\n");
 
-  //pthread_mutex_unlock(&delete_subs_lock);
+    //print_subscriptions();
+
+    //head = NULL; // Garantir que o ponteiro head esteja nulo após a limpeza
+
+    print_subscriptions();
 
 
 }
@@ -317,6 +340,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
       add_entry(keys[i]);
     } else {
       //pthread_mutex_lock(&delete_subs_lock);
+      printf("Gonna notify clients\n");
       notify_clients(entry, values[i]);
       write_str(STDOUT_FILENO, "Clients Notified!\n");
       //pthread_mutex_unlock(&delete_subs_lock);
@@ -380,7 +404,9 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     } else {
       SubscriptionEntry* entry = find_entry(keys[i]);
       //pthread_mutex_lock(&delete_subs_lock);
+      printf("Gonna notify clients\n");
       notify_clients(entry, "DELETED");
+      printf("Clients notified\n");
       //pthread_mutex_unlock(&delete_subs_lock);
       remove_entry(keys[i]);
     }
