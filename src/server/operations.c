@@ -331,6 +331,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
 }
 
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
+  
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;

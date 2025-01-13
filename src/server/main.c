@@ -389,10 +389,6 @@ int handle_client_register(char* buffer, int thread_id) {
     res_pipes[thread_id] = responses_fd;
     notif_pipes[thread_id] = notifications_fd;
 
-    //printf("Requests pipe [%d]: %d\n", thread_id, req_pipes[thread_id]);
-    //printf("Responses pipe [%d]: %d\n", thread_id, res_pipes[thread_id]);
-    //printf("Notif pipe [%d]: %d\n", thread_id, notif_pipes[thread_id]);
-
     // FIFOs opened successfully
     return 0;
 }
@@ -523,12 +519,19 @@ void* client_thread(void* arg) {
 
 void reset_server() {
 
+  printf("escrever pipe notif\n");
+  for (size_t i = 0; i <  MAX_SESSION_COUNT; i++) {
+    if (notif_pipes[i] > 0) {
+      write(notif_pipes[i], "SIGUSR1", 8);
+    } // Notify client of a SIGUSR1 SIGNAL
+    
+  }
+
   print_subscriptions();
   printf("DETETOU ERRO SIGUSR1\n");
       // Limpar tudooooo
   received_sigusr1 = 0;
   server_on = 0;
-
 
   while (1) {
     if (active_sessions == 0) {
@@ -539,7 +542,9 @@ void reset_server() {
     }
   }
 
-  //print_subscriptions();
+  sleep(20);
+
+  print_subscriptions();
 
 }
 

@@ -57,6 +57,12 @@ void* notification_thread(void* arg) {
         if (bytes_read > 0) {
           buffer[bytes_read] = '\0'; // Garantir que o buffer seja uma string válida
 
+          if (strcmp("SIGUSR1", buffer) == 0) {
+            printf("SIGUS RECEIVED -> aborting client\n");
+            //end_client();
+            exit(1);
+          }
+          
           // Percorrer o buffer para adicionar espaçamento entre os pares
           char spaced_buffer[2 * sizeof(buffer)]; // Buffer maior para incluir novas linhas
           size_t j = 0; // Índice para o spaced_buffer
@@ -80,6 +86,7 @@ void* notification_thread(void* arg) {
             break;
         } else {
             perror("Erro ao ler do FIFO de notificações");
+            end_client();
             break;
         }
     }
