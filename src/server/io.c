@@ -2,13 +2,25 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdio.h>
 
 void write_str(int fd, const char *str) {
   size_t len = strlen(str);
+  const char *ptr = str;
+
   while (len > 0) {
-    len -= (size_t)write(fd, str, len);
+    ssize_t written = write(fd, ptr, len);
+
+    if (written < 0) {
+      perror("Error writing string");
+      break;
+    }
+
+    ptr += written;
+    len -= (size_t)written;
   }
 }
+
 
 void write_uint(int fd, int value) {
   char buffer[16];

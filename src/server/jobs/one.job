@@ -1,9 +1,14 @@
-WRITE [(a,anna)(b,bernardo)]
+WRITE [(c,anna)(d,bernardo)]
 WRITE [(d,dinis)(c,carlota)]
+WRITE [(d,dada)(c,cao)]
+DELETE [b,c]
+WRITE [(d,coco)(c,IST)]
+WRITE [(d,SO)(c,gomes)]
+WAIT 5000
 READ [x,z,l,v]
-SHOW
 BACKUP
-DELETE [c]
+DELETE [a]
 READ [c]
 WAIT 1000
 SHOW
+

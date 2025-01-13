@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "constants.h"
 #include "io.h"
@@ -20,7 +21,35 @@ static struct timespec delay_to_timespec(unsigned int delay_ms) {
   return (struct timespec){delay_ms / 1000, (delay_ms % 1000) * 1000000};
 }
 
+pthread_mutex_t delete_subs_lock = PTHREAD_MUTEX_INITIALIZER;
+
 SubscriptionEntry* head = NULL;
+
+void print_subscriptions() {
+    if (head == NULL) {
+        printf("No subscriptions available.\n");
+        return;
+    }
+
+    SubscriptionEntry* current_entry = head;
+    while (current_entry != NULL) {
+        printf("Key: %s\n", current_entry->key);
+        
+        ClientNode* current_client = current_entry->head_client;
+        if (current_client == NULL) {
+            printf("  No clients subscribed to this key.\n");
+        } else {
+            printf("  Clients:\n");
+            while (current_client != NULL) {
+                printf("    - Client notif_fd: %d\n", current_client->notif_fd);
+                current_client = current_client->next;
+            }
+        }
+
+        current_entry = current_entry->next;
+    }
+}
+
 
 SubscriptionEntry* find_entry(const char* key) {
   
@@ -34,13 +63,18 @@ SubscriptionEntry* find_entry(const char* key) {
   return NULL;
 }
 
-SubscriptionEntry* add_entry(const char* key) {
+void add_entry(const char* key) {
   
   SubscriptionEntry* new_entry = (SubscriptionEntry*)malloc(sizeof(SubscriptionEntry));
 
   if (!new_entry) {
     perror("Failed to allocate memory for SubscriptionEntry");
-    return head; // Retorna a lista original
+    return; // Retorna a lista original
+  }
+
+  if (find_entry(key) != NULL) {
+    printf("Entry with key '%s' already exists.\n", key);
+    return;
   }
 
   // Inicializar os campos do nó
@@ -49,13 +83,13 @@ SubscriptionEntry* add_entry(const char* key) {
   new_entry->head_client = NULL;
   new_entry->next = head; // Aponta para o antigo cabeçalho
 
-  return new_entry; // Retorna o novo cabeçalho
+  head = new_entry; // Retorna o novo cabeçalho
 }
 
-SubscriptionEntry* remove_entry(const char* key) {
+void remove_entry(const char* key) {
 
   if (head == NULL) {
-    return NULL;
+    return;
   }
 
   SubscriptionEntry* curr = head;
@@ -82,8 +116,6 @@ SubscriptionEntry* remove_entry(const char* key) {
   }
   free(curr);
 
-  return head;
-
 }
 
 int add_key_subscriber(const char* key, int notif_id) {
@@ -91,6 +123,7 @@ int add_key_subscriber(const char* key, int notif_id) {
   SubscriptionEntry* entry = find_entry(key);
 
   if (entry == NULL) {
+    //printf("Entry not found\n");
     return 1;
   }
   // Criar um novo cliente
@@ -98,25 +131,27 @@ int add_key_subscriber(const char* key, int notif_id) {
   
   if (!new_client) {
       perror("Failed to allocate memory for ClientNode");
-      return 1; // Retorna erro se a alocação falhar
+      return -1; // Retorna erro se a alocação falhar
   }
 
   new_client->notif_fd = notif_id; // Define o ID de notificação
   new_client->next = entry->head_client; // Insere no início da lista de clientes
   entry->head_client = new_client; // Atualiza o ponteiro para a lista de clientes
-
+  
   return 0; // Sucesso
 }
 
 int remove_key_subscriber(const char* key, int notif_id) {
   
   if (head == NULL || key == NULL) {
-      return -1;
+    printf("Null head or null key\n");
+    return -1;
   }
 
   SubscriptionEntry* entry = find_entry(key);
   if (entry == NULL) {
-      return -1;
+    printf("Key does not exist\n");
+    return 1;
   }
 
   ClientNode* current = entry->head_client;
@@ -139,12 +174,19 @@ int remove_key_subscriber(const char* key, int notif_id) {
       current = current->next;
   }
 
-  return -1;
+
+  return 1;
 }
 
 int disconnect_client(int notif_id) {
 
   SubscriptionEntry* entry = head;
+
+  if (entry == NULL) {
+    perror("Null entry\n");
+    return 1;
+  }
+
 
     while (entry != NULL) {
         
@@ -173,7 +215,7 @@ int disconnect_client(int notif_id) {
         
         entry = entry->next;
     }
-
+    
     return 0;
 
 }
@@ -188,9 +230,12 @@ void notify_clients(SubscriptionEntry* entry, const char* new_value) {
         char notification[MAX_STRING_SIZE*2 + 4]; // Espaço suficiente para chave, valor e parênteses
         snprintf(notification, sizeof(notification), "(%s,%s)", entry->key, new_value);
 
+        //pthread_mutex_lock(&notif);
         ssize_t bytes_written = write(curr_client->notif_fd, notification, strlen(notification));
+        //pthread_mutex_unlock(&notif);
+
         if (bytes_written < 0) {
-            perror("Failed to write to notification pipe\n");
+            perror("WTF: Failed to write to notification pipe\n");
         } else {
             printf("Notification sent to client pipe %d\n", curr_client->notif_fd);
         }
@@ -198,6 +243,33 @@ void notify_clients(SubscriptionEntry* entry, const char* new_value) {
         // Passar para o próximo cliente
         curr_client = curr_client->next;
     }
+
+}
+
+void remove_all_subscriptions() {
+
+  //pthread_mutex_lock(&delete_subs_lock);
+
+    SubscriptionEntry* entry = head;
+
+    while (entry != NULL) {
+        // Limpar os clientes associados à chave
+        ClientNode* client = entry->head_client;
+        while (client != NULL) {
+            ClientNode* next_client = client->next;
+            free(client);
+            client = next_client;
+        }
+
+        // Limpar a entrada de assinatura
+        SubscriptionEntry* next_entry = entry->next;
+        entry = next_entry;
+    }
+
+    head = NULL; // Garantir que o ponteiro head esteja nulo após a limpeza
+
+  //pthread_mutex_unlock(&delete_subs_lock);
+
 
 }
 
@@ -225,29 +297,36 @@ int kvs_terminate() {
 
 int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
               char values[][MAX_STRING_SIZE]) {
+
+
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
 
   pthread_rwlock_wrlock(&kvs_table->tablelock);
-
   for (size_t i = 0; i < num_pairs; i++) {
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write key pair (%s,%s)\n", keys[i], values[i]);
     }
-    
     SubscriptionEntry* entry = find_entry(keys[i]);
 
+    //printf("NEW WRITE ON KEY %s\n", keys[i]);
+
     if (entry == NULL) {
-      head = add_entry(keys[i]);
+      add_entry(keys[i]);
     } else {
+      //pthread_mutex_lock(&delete_subs_lock);
       notify_clients(entry, values[i]);
+      write_str(STDOUT_FILENO, "Clients Notified!\n");
+      //pthread_mutex_unlock(&delete_subs_lock);
+
     }
   }
 
 
   pthread_rwlock_unlock(&kvs_table->tablelock);
+
   return 0;
 }
 
@@ -279,6 +358,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
 int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   
+  
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
@@ -288,7 +368,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
   int aux = 0;
   for (size_t i = 0; i < num_pairs; i++) {
-    if (delete_pair(kvs_table, keys[i])) {
+    if (delete_pair(kvs_table, keys[i]) != 0) {
       if (!aux) {
         write_str(fd, "[");
         aux = 1;
@@ -297,9 +377,11 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
       snprintf(str, MAX_STRING_SIZE, "(%s,KVSMISSING)", keys[i]);
       write_str(fd, str);
     } else {
-      head = remove_entry(keys[i]);
       SubscriptionEntry* entry = find_entry(keys[i]);
+      //pthread_mutex_lock(&delete_subs_lock);
       notify_clients(entry, "DELETED");
+      //pthread_mutex_unlock(&delete_subs_lock);
+      remove_entry(keys[i]);
     }
     
   }
@@ -308,6 +390,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   }
 
   pthread_rwlock_unlock(&kvs_table->tablelock);
+
   return 0;
 }
 

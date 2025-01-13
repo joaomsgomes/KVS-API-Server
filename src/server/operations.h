@@ -78,10 +78,14 @@ int remove_key_subscriber(const char* key, int notif_id);
 
 int disconnect_client(int notif_id);
 
-SubscriptionEntry* add_entry(const char* key);
+void add_entry(const char* key);
 
-SubscriptionEntry* remove_entry(const char* key);
+void remove_entry(const char* key);
 
 SubscriptionEntry* find_entry(const char* key);
+
+void print_subscriptions();
+
+void remove_all_subscriptions();
 
 #endif  // KVS_OPERATIONS_H

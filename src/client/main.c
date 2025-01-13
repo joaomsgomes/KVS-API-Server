@@ -38,7 +38,6 @@ int main(int argc, char* argv[]) {
 
   while (1) {
     
-    //write_all(STDOUT_FILENO, "SWITCH\n", 8);
     switch (get_next(STDIN_FILENO)) {
       
       case CMD_DISCONNECT:
@@ -46,15 +45,13 @@ int main(int argc, char* argv[]) {
           fprintf(stderr, "Failed to disconnect to the server\n");
           return 1;
         
-        }
-        
-        // TODO: end notifications thread 
-        // UPDATE: THREAD IS ENDED IN API
+        } 
+        // UPDATE: NOTIFICATION THREAD IS ENDED IN API
         printf("Disconnected from server\n");
         return 0;
 
       case CMD_SUBSCRIBE:
-        printf("Entrou no Subscribe\n");
+
         num = parse_list(STDIN_FILENO, keys, 1, MAX_STRING_SIZE);
         if (num == 0) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
@@ -64,6 +61,7 @@ int main(int argc, char* argv[]) {
         if (kvs_subscribe(keys[0])) {
             fprintf(stderr, "Command subscribe failed\n");
         }
+        
 
         break;
 
@@ -106,7 +104,6 @@ int main(int argc, char* argv[]) {
           fprintf(stderr, "Failed to disconnect to the server\n");
           return 1;
         }
-        
         printf("Disconnected from server\n");
         return 0;
     }
